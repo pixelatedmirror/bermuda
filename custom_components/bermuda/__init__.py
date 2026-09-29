@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from homeassistant.core import callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_registry import async_migrate_entries
@@ -20,11 +21,7 @@ from .coordinator import BermudaDataUpdateCoordinator
 from .util import mac_math_offset, mac_norm
 
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
     from homeassistant.helpers.device_registry import DeviceEntry
-
-BermudaConfigEntry = ConfigEntry["BermudaData"]
 
 
 @dataclass
@@ -32,6 +29,9 @@ class BermudaData:
     """Holds global data for Bermuda."""
 
     coordinator: BermudaDataUpdateCoordinator
+
+
+BermudaConfigEntry = ConfigEntry[BermudaData]
 
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
