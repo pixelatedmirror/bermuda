@@ -69,7 +69,9 @@ from .const import (
     CONF_MAX_RADIUS,
     CONF_MAX_VELOCITY,
     CONF_REF_POWER,
+    CONF_RSSI_OFFSET,
     CONF_RSSI_OFFSETS,
+    CONF_SCANNER,
     CONF_SMOOTHING_SAMPLES,
     CONF_UPDATE_INTERVAL,
     DEFAULT_ATTENUATION,
@@ -94,6 +96,7 @@ from .const import (
     SAVEOUT_COOLDOWN,
     SIGNAL_DEVICE_NEW,
     SIGNAL_SCANNERS_CHANGED,
+    SUBENTRY_TYPE_CALIBRATION,
     UPDATE_INTERVAL,
 )
 from .util import mac_explode_formats, mac_norm
@@ -267,6 +270,20 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                     CONF_RSSI_OFFSETS,
                 ):
                     self.options[key] = val
+
+        # FoXaCe v2 config entries store scanner RSSI offsets in subentries of type "calibration".
+        # Mirror them into self.options[CONF_RSSI_OFFSETS] so advert calculations continue to work seamlessly.
+        subentries = getattr(entry, "subentries", {}) or {}
+        calibration_offsets = {
+            se.data[CONF_SCANNER]: se.data[CONF_RSSI_OFFSET]
+            for se in subentries.values()
+            if getattr(se, "subentry_type", None) == SUBENTRY_TYPE_CALIBRATION
+            and getattr(se, "data", None)
+            and CONF_SCANNER in se.data
+            and CONF_RSSI_OFFSET in se.data
+        }
+        if calibration_offsets:
+            self.options.setdefault(CONF_RSSI_OFFSETS, {}).update(calibration_offsets)
 
         self.devices: dict[str, BermudaDevice] = {}
         # self.updaters: dict[str, BermudaPBDUCoordinator] = {}

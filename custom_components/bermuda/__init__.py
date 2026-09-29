@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from homeassistant.helpers.device_registry import DeviceEntry
 
-type BermudaConfigEntry = ConfigEntry[BermudaData]
+BermudaConfigEntry = ConfigEntry["BermudaData"]
 
 
 @dataclass
@@ -68,29 +68,34 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: BermudaConfigEn
     _LOGGER.debug("Migrating config from version %s.%s", config_entry.version, config_entry.minor_version)
     _oldversion = f"{config_entry.version}.{config_entry.minor_version}"
 
-    if config_entry.version == 3:  # it won't be.
-        # Bogus version for now, wanted to placeholder the migrate_entries / unique_id thing.
-        # If we need to manage unique_id of sensors, we probably just need
-        # to manage the callback, but not worry about the hass update.
-        #
-        # This is lifted from the discussion at https://community.home-assistant.io/t/migrating-unique-ids/348512
-        #
-        # Also worth looking at https://github.com/home-assistant/core/pull/115265/files for an example
-        # of migrating unique_ids from one form to another.
-        #
-        old_unique_id = config_entry.unique_id
-        new_unique_id = mac_math_offset(old_unique_id, 3)
+    # Handle FoXaCe version 2 config entries:
+    # FoXaCe moved per-scanner RSSI offsets from options into "calibration" subentries.
+    # If loading in our codebase, extract any calibration subentries back into options[CONF_RSSI_OFFSETS]
+    # and update the config entry to version 1.
+    if config_entry.version == 2:
+        from .const import CONF_RSSI_OFFSET, CONF_RSSI_OFFSETS, CONF_SCANNER, SUBENTRY_TYPE_CALIBRATION
 
-        @callback
-        def update_unique_id(entity_entry):
-            """Update unique_id of an entity."""
-            return {"new_unique_id": entity_entry.unique_id.replace(old_unique_id, new_unique_id)}
+        subentries = getattr(config_entry, "subentries", {}) or {}
+        calibration_offsets = {
+            se.data[CONF_SCANNER]: se.data[CONF_RSSI_OFFSET]
+            for se in subentries.values()
+            if getattr(se, "subentry_type", None) == SUBENTRY_TYPE_CALIBRATION
+            and getattr(se, "data", None)
+            and CONF_SCANNER in se.data
+            and CONF_RSSI_OFFSET in se.data
+        }
 
-        if old_unique_id != new_unique_id:
-            await async_migrate_entries(hass, config_entry.entry_id, update_unique_id)
-            hass.config_entries.async_update_entry(config_entry, unique_id=new_unique_id)
+        new_options = dict(config_entry.options)
+        if calibration_offsets:
+            current_offsets = dict(new_options.get(CONF_RSSI_OFFSETS, {}))
+            current_offsets.update(calibration_offsets)
+            new_options[CONF_RSSI_OFFSETS] = current_offsets
 
-        return False
+        hass.config_entries.async_update_entry(config_entry, options=new_options, version=1)
+        _LOGGER.info(
+            "Migrated FoXaCe v2 config entry to v1, restoring %d scanner offset(s)",
+            len(calibration_offsets),
+        )
 
     if f"{config_entry.version}.{config_entry.minor_version}" != _oldversion:
         _LOGGER.info("Migrated config entry to version %s.%s", config_entry.version, config_entry.minor_version)

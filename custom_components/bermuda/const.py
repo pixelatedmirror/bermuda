@@ -182,6 +182,11 @@ CONF_SAVE_AND_CLOSE = "save_and_close"
 CONF_SCANNER_INFO = "scanner_info"
 CONF_RSSI_OFFSETS = "rssi_offsets"
 
+# Per-scanner RSSI calibration subentries (compatibility with FoXaCe config version 2)
+SUBENTRY_TYPE_CALIBRATION = "calibration"
+CONF_SCANNER = "scanner"
+CONF_RSSI_OFFSET = "rssi_offset"
+
 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL = "update_interval", 10
 DOCS[CONF_UPDATE_INTERVAL] = (
     "Maximum time between sensor updates in seconds. Smaller intervals",
