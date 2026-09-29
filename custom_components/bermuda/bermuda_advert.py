@@ -158,13 +158,14 @@ class BermudaAdvert(dict):
                 self.stale_update_count += 1
                 return
 
-        elif self.rssi != advertisementdata.rssi:
-            # If the rssi has changed from last time, consider it "new". Since this scanner does
-            # not send stamps, this is probably a USB bluetooth adaptor.
-            new_stamp = monotonic_time_coarse() - 3.0  # age usb adaptors slightly, since they are not "fresh"
         else:
-            # USB Adaptor has nothing new for us, bail.
-            return
+            # Scanner does not provide stamps (e.g. local USB Bluetooth adapter / BlueZ).
+            # The backend scanner has received/retained an advert for this device in this update cycle.
+            # We assign a new_stamp so the device does not falsely time out after DISTANCE_TIMEOUT (30s)
+            # when stationary with a steady RSSI.
+            new_stamp = monotonic_time_coarse() - 3.0  # age usb adaptors slightly, since they are not "fresh"
+            if self.rssi == advertisementdata.rssi:
+                self.stale_update_count += 1
 
         # Update our parent scanner's last_seen if we have a new stamp.
         if new_stamp > self.scanner_device.last_seen + 0.01:  # some slight warp seems common.
