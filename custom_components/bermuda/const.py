@@ -129,12 +129,12 @@ class IrkTypes(Enum):
 # Accoring to the backend comments, BlueZ times out adverts at 180 seconds, and HA
 # expires adverts at 195 seconds to avoid churning.
 #
-PRUNE_MAX_COUNT = 1000  # How many device entries to allow at maximum
+PRUNE_MAX_COUNT = 500  # How many device entries to allow at maximum
 PRUNE_TIME_INTERVAL = 180  # Every 3m, prune stale devices
 # ### Note about timeouts: Bluez and HABT cache for 180 or 195 seconds. Setting
 # timeouts below that may result in prune/create/prune churn, but as long as
 # we only re-create *fresh* devices the risk is low.
-PRUNE_TIME_DEFAULT = 86400  # Max age of regular device entries (1day)
+PRUNE_TIME_DEFAULT = 7200  # Max age of regular untracked device entries (2 hours instead of 24h)
 PRUNE_TIME_UNKNOWN_IRK = 240  # Resolvable Private addresses change often, prune regularly.
 # see Bluetooth Core Spec, Vol3, Part C, Appendix A, Table A.1: Defined GAP timers
 PRUNE_TIME_KNOWN_IRK: Final[int] = 16 * 60  # spec "recommends" 15 min max address age. Round up to 16 :-)

@@ -206,24 +206,27 @@ class BermudaDevice(dict):
             elif len(self.address) == 17:
                 top_bits = int(self.address[0:1], 16) >> 2
                 # The two MSBs of the first octet dictate the random type...
-                if top_bits & 0b00:  # First char will be in [0 1 2 3]
+                if top_bits == 0b00:  # First char will be in [0, 1, 2, 3]
                     self.address_type = BDADDR_TYPE_RANDOM_UNRESOLVABLE
-                elif top_bits & 0b01:  # Addresses where the first char will be 4,5,6 or 7
+                elif top_bits == 0b01:  # Addresses where the first char will be 4, 5, 6, 7
                     _LOGGER.debug("Identified Resolvable Private (potential IRK source) Address on %s", self.address)
                     self.address_type = BDADDR_TYPE_RANDOM_RESOLVABLE
                     self._coordinator.irk_manager.check_mac(self.address)
-                elif top_bits & 0b10:
-                    self.address_type = "reserved"
-                    _LOGGER.debug("Hey, got one of those reserved MACs, %s", self.address)
-                elif top_bits & 0b11:
+                elif top_bits == 0b10:  # Reserved / Public range (first char 8, 9, a, b)
+                    self.address_type = BDADDR_TYPE_OTHER
+                    _LOGGER.debug("Identified Public or Reserved MAC on %s", self.address)
+                elif top_bits == 0b11:  # Random static (first char c, d, e, f)
                     self.address_type = BDADDR_TYPE_RANDOM_STATIC
 
+                # Check manufacturer for static or standard MACs
+                if self.address_type in (BDADDR_TYPE_OTHER, BDADDR_TYPE_RANDOM_STATIC):
+                    name, generic = self._coordinator.get_manufacturer_from_id(self.address[:8])
+                    if name and (self.manufacturer is None or not generic):
+                        self.manufacturer = name
+
             else:
-                # This is a normal MAC address.
+                # Fallback for unexpected address formats
                 self.address_type = BDADDR_TYPE_OTHER
-                name, generic = self._coordinator.get_manufacturer_from_id(self.address[:8])
-                if name and (self.manufacturer is None or not generic):
-                    self.manufacturer = name
 
     @property
     def is_scanner(self):

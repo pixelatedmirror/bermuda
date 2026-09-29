@@ -61,6 +61,8 @@ from .const import (
     AREA_MAX_AD_AGE,
     BDADDR_TYPE_NOT_MAC48,
     BDADDR_TYPE_RANDOM_RESOLVABLE,
+    BDADDR_TYPE_RANDOM_UNRESOLVABLE,
+    BDADDR_TYPE_UNKNOWN,
     CONF_ATTENUATION,
     CONF_DEVICES,
     CONF_DEVTRACK_TIMEOUT,
@@ -831,21 +833,24 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
             # should totally be pruned if it's no longer around.
             if (
                 device_address not in metadevice_source_keepers
-                and device not in self.metadevices
+                and device_address not in self.metadevices
                 and device_address not in self.scanner_list
                 and (not device.create_sensor)  # Not if we track the device
                 and (not device.is_scanner)  # redundant, but whatevs.
                 and device.address_type != BDADDR_TYPE_NOT_MAC48
             ):
-                if device.address_type == BDADDR_TYPE_RANDOM_RESOLVABLE:
-                    # This is an *UNKNOWN* IRK source address, or a known one which is
-                    # well and truly stale (ie, not in keepers).
-                    # We prune unknown irk's aggressively because they pile up quickly
+                if device.address_type in (
+                    BDADDR_TYPE_RANDOM_RESOLVABLE,
+                    BDADDR_TYPE_RANDOM_UNRESOLVABLE,
+                ):
+                    # This is an *UNKNOWN* IRK or random unresolvable source address,
+                    # or a known one which is well and truly stale (ie, not in keepers).
+                    # We prune random private addresses aggressively because they pile up quickly
                     # in high-density situations, and *we* don't need to hang on to new
                     # enrollments because we'll seed them from PBLE.
                     if device.last_seen < stamp_unknown_irk:
                         _LOGGER.debug(
-                            "Marking stale (%ds) Unknown IRK address for pruning: [%s] %s",
+                            "Marking stale (%ds) Unknown IRK/Random address for pruning: [%s] %s",
                             nowstamp - device.last_seen,
                             device_address,
                             device.name,
@@ -889,10 +894,10 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                     "Prune quota short by %d. Pruning %d extra devices (down to age %0.2f seconds)",
                     prune_quota_shortfall,
                     cutoff_index,
-                    nowstamp - sorted_addresses[prune_quota_shortfall - 1][0],
+                    nowstamp - sorted_addresses[cutoff_index - 1][0],
                 )
                 # pylint: disable-next=unused-variable
-                for _stamp, address in sorted_addresses[: prune_quota_shortfall - 1]:
+                for _stamp, address in sorted_addresses[:cutoff_index]:
                     prune_list.append(address)
             else:
                 _LOGGER.warning(
@@ -911,7 +916,8 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         # Prune the source devices
         for device_address in prune_list:
             _LOGGER.debug("Acting on prune list for %s", device_address)
-            del self.devices[device_address]
+            if dev := self.devices.pop(device_address, None):
+                dev.adverts.clear()
 
         # Clean out the scanners dicts in metadevices and scanners
         # (scanners will have entries if they are also beacons, although
