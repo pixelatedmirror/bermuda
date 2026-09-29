@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from cryptography.hazmat.primitives.ciphers import Cipher
     from homeassistant.components.bluetooth import BluetoothCallback
 
-type Cancellable = Callable[[], None]
+Cancellable = Callable[[], None]
 
 
 class ResolvableMAC(NamedTuple):

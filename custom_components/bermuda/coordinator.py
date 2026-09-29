@@ -1194,13 +1194,11 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                 # anything that isn't already set to something interesting, overwrite
                 # it with the new device's data.
                 for key, val in source_device.items():
-                    if val is any(
-                        [
-                            source_device.name_bt_local_name,
-                            source_device.name_bt_serviceinfo,
-                            source_device.manufacturer,
-                        ]
-                    ) and metadevice[key] in [None, False]:
+                    if val in (
+                        source_device.name_bt_local_name,
+                        source_device.name_bt_serviceinfo,
+                        source_device.manufacturer,
+                    ) and metadevice.get(key) in [None, False]:
                         metadevice[key] = val
                         _want_name_update = True
 
@@ -1210,14 +1208,12 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                 # Anything that's VERY interesting, overwrite it regardless of what's already there:
                 # INTERESTING:
                 for key, val in source_device.items():
-                    if val is any(
-                        [
-                            source_device.beacon_major,
-                            source_device.beacon_minor,
-                            source_device.beacon_power,
-                            source_device.beacon_unique_id,
-                            source_device.beacon_uuid,
-                        ]
+                    if val in (
+                        source_device.beacon_major,
+                        source_device.beacon_minor,
+                        source_device.beacon_power,
+                        source_device.beacon_unique_id,
+                        source_device.beacon_uuid,
                     ):
                         metadevice[key] = val
                         # _want_name_update = True

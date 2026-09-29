@@ -98,17 +98,12 @@ async def async_setup_entry(
         # go over time. So we need to maintain our matrix of which ones we have already
         # spun-up so we don't duplicate any.
 
-        for scanner in coordinator.get_scanners:
-            if (
-                scanner.is_remote_scanner is None  # usb/HCI scanner's are fine.
-                or (scanner.is_remote_scanner and scanner.address_wifi_mac is None)
-            ):
-                # This scanner doesn't have a wifi mac yet, bail out
-                # until they are all filled out.
-                return
-
         entities = []
         for scanner in coordinator.scanner_list:
+            scanner_dev = coordinator._get_device(scanner)
+            if scanner_dev and scanner_dev.is_remote_scanner and scanner_dev.address_wifi_mac is None:
+                # This remote scanner doesn't have a wifi mac resolved yet, skip it for now
+                continue
             for address in created_devices:
                 if address not in created_scanners.get(scanner, []):
                     _LOGGER.debug(
