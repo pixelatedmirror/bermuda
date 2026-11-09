@@ -50,8 +50,8 @@ from .const import (
     ICON_DEFAULT_FLOOR,
     METADEVICE_IBEACON_DEVICE,
     METADEVICE_PRIVATE_BLE_DEVICE,
-    METADEVICE_SOURCETYPES,
     METADEVICE_TYPE_IBEACON_SOURCE,
+    METADEVICE_TYPE_PRIVATE_BLE_SOURCE,
 )
 from .util import clean_charbuf, mac_math_offset, mac_norm
 
@@ -242,12 +242,16 @@ class BermudaDevice(dict):
     @property
     def is_advert_tracked(self) -> bool:
         """Return True if this device should retain per-scanner BermudaAdvert records."""
-        return (
-            self.create_sensor
-            or self._is_scanner
-            or bool(self.metadevice_type.intersection(METADEVICE_SOURCETYPES))
-            or self.address.upper() in self.options.get(CONF_DEVICES, [])
-        )
+        if self.create_sensor or self._is_scanner:
+            return True
+        if self.address.upper() in self.options.get(CONF_DEVICES, []):
+            return True
+        if METADEVICE_TYPE_PRIVATE_BLE_SOURCE in self.metadevice_type:
+            return True
+        if METADEVICE_TYPE_IBEACON_SOURCE in self.metadevice_type:
+            if self.beacon_unique_id and self.beacon_unique_id.upper() in self.options.get(CONF_DEVICES, []):
+                return True
+        return False
 
     def async_as_scanner_nolonger(self):
         """Call when this device is unregistered as a BaseHaScanner."""
@@ -541,21 +545,15 @@ class BermudaDevice(dict):
         itself does not provide stamps (such as usb Bluetooth / BlueZ devices).
         """
         if self.is_remote_scanner:
-            if self.stamps is None:
-                _LOGGER_SPAM_LESS.debug(
-                    f"remote_no_stamps{self.address}", "Remote Scanner %s has no stamps dict", self.__repr__()
-                )
+            if not self.stamps:
                 return None
-            if len(self.stamps) == 0:
-                _LOGGER_SPAM_LESS.debug(
-                    f"remote_stamps_empty{self.address}", "Remote scanner %s has an empty stamps dict", self.__repr__()
-                )
-                return None
-            try:
-                return self.stamps[address.upper()]
-            except (KeyError, AttributeError):
-                # No current record, device might have "stale"d out.
-                return None
+            addr_upper = address.upper()
+            if addr_upper in self.stamps:
+                return self.stamps[addr_upper]
+            addr_lower = address.lower()
+            if addr_lower in self.stamps:
+                return self.stamps[addr_lower]
+            return None
         # Probably a usb / BlueZ device.
         return None
 
@@ -728,35 +726,42 @@ class BermudaDevice(dict):
 
         local_name = getattr(advertisementdata, "local_name", None)
         if local_name is not None and isinstance(local_name, str):
-            cleaned = clean_charbuf(local_name)
-            if cleaned and (self.name_bt_local_name is None or len(self.name_bt_local_name) < len(cleaned)):
-                self.name_bt_local_name = cleaned
-                _want_name_update = True
+            if self.name_bt_local_name is None:
+                cleaned = clean_charbuf(local_name)
+                if cleaned:
+                    self.name_bt_local_name = cleaned
+                    _want_name_update = True
 
-        service_uuids = getattr(advertisementdata, "service_uuids", None)
-        if isinstance(service_uuids, (list, set, tuple)):
-            for uuid in service_uuids:
-                if len(uuid) >= 8:
-                    name, generic = self._coordinator.get_manufacturer_from_id(uuid[4:8])
-                    if name and (self.manufacturer is None or not generic):
-                        self.manufacturer = name
-                        _want_name_update = True
+        if self.manufacturer is None:
+            service_uuids = getattr(advertisementdata, "service_uuids", None)
+            if isinstance(service_uuids, (list, set, tuple)):
+                for uuid in service_uuids:
+                    if len(uuid) >= 8:
+                        name, generic = self._coordinator.get_manufacturer_from_id(uuid[4:8])
+                        if name and not generic:
+                            self.manufacturer = name
+                            _want_name_update = True
+                            break
 
         manufacturer_data = getattr(advertisementdata, "manufacturer_data", None)
         if isinstance(manufacturer_data, dict):
             for company_code, man_data in manufacturer_data.items():
-                name, generic = self._coordinator.get_manufacturer_from_id(company_code)
-                if name and (self.manufacturer is None or not generic):
-                    self.manufacturer = name
-                    _want_name_update = True
+                if self.manufacturer is None:
+                    name, generic = self._coordinator.get_manufacturer_from_id(company_code)
+                    if name and (not generic or self.manufacturer is None):
+                        self.manufacturer = name
+                        _want_name_update = True
 
-                if company_code == 0x004C and isinstance(man_data, (bytes, bytearray)):
-                    if man_data[:1] == b"\x02":
-                        if len(man_data) >= 22:
-                            self.metadevice_type.add(METADEVICE_TYPE_IBEACON_SOURCE)
-                            self.beacon_uuid = man_data[2:18].hex().lower()
-                            self.beacon_major = str(int.from_bytes(man_data[18:20], byteorder="big"))
-                            self.beacon_minor = str(int.from_bytes(man_data[20:22], byteorder="big"))
+                if (
+                    company_code == 0x004C
+                    and self.beacon_unique_id is None
+                    and isinstance(man_data, (bytes, bytearray))
+                ):
+                    if man_data[:1] == b"\x02" and len(man_data) >= 22:
+                        self.metadevice_type.add(METADEVICE_TYPE_IBEACON_SOURCE)
+                        self.beacon_uuid = man_data[2:18].hex().lower()
+                        self.beacon_major = str(int.from_bytes(man_data[18:20], byteorder="big"))
+                        self.beacon_minor = str(int.from_bytes(man_data[20:22], byteorder="big"))
                         if len(man_data) >= 23:
                             self.beacon_power = int.from_bytes([man_data[22]], signed=True)
 
@@ -797,8 +802,8 @@ class BermudaDevice(dict):
         stamp: float | None = None
         if scanner_device.is_remote_scanner:
             stamp = scanner_device.async_as_scanner_get_stamp(device_address)
-        if stamp is None:
-            stamp = monotonic_time_coarse()
+        else:
+            stamp = monotonic_time_coarse() - 3.0
 
         if stamp is not None and self.last_seen < stamp:
             self.last_seen = stamp

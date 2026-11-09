@@ -253,6 +253,7 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         self.options[CONF_REF_POWER] = DEFAULT_REF_POWER
         self.options[CONF_SMOOTHING_SAMPLES] = DEFAULT_SMOOTHING_SAMPLES
         self.options[CONF_UPDATE_INTERVAL] = DEFAULT_UPDATE_INTERVAL
+        self.options[CONF_UNCONFIGURED_RSSI_THRESHOLD] = DEFAULT_UNCONFIGURED_RSSI_THRESHOLD
         self.options[CONF_RSSI_OFFSETS] = {}
 
         if hasattr(entry, "options"):
@@ -269,6 +270,8 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                     CONF_MAX_VELOCITY,
                     CONF_REF_POWER,
                     CONF_SMOOTHING_SAMPLES,
+                    CONF_UNCONFIGURED_RSSI_THRESHOLD,
+                    CONF_UPDATE_INTERVAL,
                     CONF_RSSI_OFFSETS,
                 ):
                     self.options[key] = val
@@ -752,6 +755,11 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
             CONF_UNCONFIGURED_RSSI_THRESHOLD, DEFAULT_UNCONFIGURED_RSSI_THRESHOLD
         )
         configured_devices = {addr.upper() for addr in self.options.get(CONF_DEVICES, [])}
+        min_stamp_threshold = (
+            self.stamp_last_update_started - 3
+            if self.stamp_last_update_started > 0
+            else nowstamp - 30
+        )
 
         # Initialise ha_scanners if we haven't already
         if self._scanner_init_pending:
@@ -779,15 +787,21 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                 continue
 
             scanner_device.async_as_scanner_update(ha_scanner)
+            is_remote = scanner_device.is_remote_scanner
 
             # Now go through the scanner's adverts and send them to our device objects.
             for bledevice, advertisementdata in ha_scanner.discovered_devices_and_advertisement_data.values():
-                if adstamp := scanner_device.async_as_scanner_get_stamp(bledevice.address):
-                    if adstamp < self.stamp_last_update_started - 3:
-                        # skip older adverts that should already have been processed
-                        continue
                 if advertisementdata.rssi == -127:
                     # BlueZ is pushing bogus adverts for paired but absent devices.
+                    continue
+
+                adstamp = scanner_device.async_as_scanner_get_stamp(bledevice.address)
+
+                # For remote scanners (ESPHome proxies): if no stamp or older than cutoff, skip!
+                if is_remote:
+                    if adstamp is None or adstamp < min_stamp_threshold:
+                        continue
+                elif adstamp is not None and adstamp < min_stamp_threshold:
                     continue
 
                 # Filter weak adverts for unconfigured devices below the RSSI threshold
@@ -1147,6 +1161,12 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         # set up for them.
 
         for metadevice in self.metadevices.values():
+            if (
+                not metadevice.create_sensor
+                and metadevice.address.upper() not in self.options.get(CONF_DEVICES, [])
+            ):
+                continue
+
             # Find every known source device and copy their adverts in.
 
             # Keep track of whether we want to recalculate the name fields at the end.
