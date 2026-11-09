@@ -99,6 +99,17 @@ def test_make_name(bermuda_device):
 def test_process_advertisement(bermuda_device, bermuda_scanner):
     """Test process_advertisement method."""
     advertisement_data = MagicMock()
+    advertisement_data.local_name = "Test BLE Device"
+    advertisement_data.manufacturer_data = {}
+    advertisement_data.service_uuids = []
+
+    # Unconfigured device retains metadata but does not create adverts
+    bermuda_device.process_advertisement(bermuda_scanner, advertisement_data)
+    assert len(bermuda_device.adverts) == 0
+    assert bermuda_device.name_bt_local_name == "Test BLE Device"
+
+    # Configured device creates adverts
+    bermuda_device.create_sensor = True
     bermuda_device.process_advertisement(bermuda_scanner, advertisement_data)
     assert len(bermuda_device.adverts) == 1
 

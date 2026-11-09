@@ -50,9 +50,10 @@ from .const import (
     ICON_DEFAULT_FLOOR,
     METADEVICE_IBEACON_DEVICE,
     METADEVICE_PRIVATE_BLE_DEVICE,
+    METADEVICE_SOURCETYPES,
     METADEVICE_TYPE_IBEACON_SOURCE,
 )
-from .util import mac_math_offset, mac_norm
+from .util import clean_charbuf, mac_math_offset, mac_norm
 
 if TYPE_CHECKING:
     from bleak.backends.scanner import AdvertisementData
@@ -142,6 +143,8 @@ class BermudaDevice(dict):
         self.adverts: dict[
             tuple[str, str], BermudaAdvert
         ] = {}  # str will be a scanner address OR a deviceaddress__scanneraddress
+        if self.address.upper() in self.options.get(CONF_DEVICES, []):
+            self.create_sensor = True
         self._async_process_address_type()
 
     def _async_process_address_type(self):
@@ -235,6 +238,16 @@ class BermudaDevice(dict):
     @property
     def is_remote_scanner(self):
         return self._is_remote_scanner
+
+    @property
+    def is_advert_tracked(self) -> bool:
+        """Return True if this device should retain per-scanner BermudaAdvert records."""
+        return (
+            self.create_sensor
+            or self._is_scanner
+            or bool(self.metadevice_type.intersection(METADEVICE_SOURCETYPES))
+            or self.address.upper() in self.options.get(CONF_DEVICES, [])
+        )
 
     def async_as_scanner_nolonger(self):
         """Call when this device is unregistered as a BaseHaScanner."""
@@ -680,6 +693,13 @@ class BermudaDevice(dict):
         etc can be freshly smoothed and filtered.
 
         """
+        if not self.is_advert_tracked:
+            return
+
+        if self.address.upper() in self.options.get(CONF_DEVICES, []):
+            # We are a device we track. Flag for set-up:
+            self.create_sensor = True
+
         # Run calculate_data on each child scanner of this device:
         for advert in self.adverts.values():
             if isinstance(advert, BermudaAdvert):
@@ -702,9 +722,50 @@ class BermudaDevice(dict):
         else:
             self.zone = STATE_NOT_HOME
 
-        if self.address.upper() in self.options.get(CONF_DEVICES, []):
-            # We are a device we track. Flag for set-up:
-            self.create_sensor = True
+    def process_advertisement_data(self, advertisementdata: AdvertisementData):
+        """Parse advertisement data for name, manufacturer, and iBeacon info without requiring BermudaAdvert."""
+        _want_name_update = False
+
+        local_name = getattr(advertisementdata, "local_name", None)
+        if local_name is not None and isinstance(local_name, str):
+            cleaned = clean_charbuf(local_name)
+            if cleaned and (self.name_bt_local_name is None or len(self.name_bt_local_name) < len(cleaned)):
+                self.name_bt_local_name = cleaned
+                _want_name_update = True
+
+        service_uuids = getattr(advertisementdata, "service_uuids", None)
+        if isinstance(service_uuids, (list, set, tuple)):
+            for uuid in service_uuids:
+                if len(uuid) >= 8:
+                    name, generic = self._coordinator.get_manufacturer_from_id(uuid[4:8])
+                    if name and (self.manufacturer is None or not generic):
+                        self.manufacturer = name
+                        _want_name_update = True
+
+        manufacturer_data = getattr(advertisementdata, "manufacturer_data", None)
+        if isinstance(manufacturer_data, dict):
+            for company_code, man_data in manufacturer_data.items():
+                name, generic = self._coordinator.get_manufacturer_from_id(company_code)
+                if name and (self.manufacturer is None or not generic):
+                    self.manufacturer = name
+                    _want_name_update = True
+
+                if company_code == 0x004C and isinstance(man_data, (bytes, bytearray)):
+                    if man_data[:1] == b"\x02":
+                        if len(man_data) >= 22:
+                            self.metadevice_type.add(METADEVICE_TYPE_IBEACON_SOURCE)
+                            self.beacon_uuid = man_data[2:18].hex().lower()
+                            self.beacon_major = str(int.from_bytes(man_data[18:20], byteorder="big"))
+                            self.beacon_minor = str(int.from_bytes(man_data[20:22], byteorder="big"))
+                        if len(man_data) >= 23:
+                            self.beacon_power = int.from_bytes([man_data[22]], signed=True)
+
+                        self.beacon_unique_id = f"{self.beacon_uuid}_{self.beacon_major}_{self.beacon_minor}"
+                        _want_name_update = True
+                        self._coordinator.register_ibeacon_source(self)
+
+        if _want_name_update:
+            self.make_name()
 
     def process_advertisement(self, scanner_device: BermudaDevice, advertisementdata: AdvertisementData):
         """
@@ -731,6 +792,29 @@ class BermudaDevice(dict):
                 advert_tuple,
             )
             return
+
+        # Determine timestamp from scanner or monotonic clock
+        stamp: float | None = None
+        if scanner_device.is_remote_scanner:
+            stamp = scanner_device.async_as_scanner_get_stamp(device_address)
+        if stamp is None:
+            stamp = monotonic_time_coarse()
+
+        if stamp is not None and self.last_seen < stamp:
+            self.last_seen = stamp
+
+        # Parse basic metadata (name, manufacturer, iBeacon discovery)
+        self.process_advertisement_data(advertisementdata)
+
+        # Check if we should track full advert history and distances for this device.
+        # Unconfigured devices only retain minimal metadata and do NOT allocate BermudaAdvert objects.
+        if not self.is_advert_tracked:
+            if self.adverts:
+                self.adverts.clear()
+            return
+
+        if self.address.upper() in self.options.get(CONF_DEVICES, []):
+            self.create_sensor = True
 
         if advert_tuple in self.adverts:
             # Device already exists, update it
