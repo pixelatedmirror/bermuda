@@ -38,6 +38,7 @@
           "smoothing_samples": "Smoothing Samples - how many samples to use for smoothing distance readings.",
           "attenuation": "Attenuation - Environment attenuation factor for distance calculation/calibration.",
           "ref_power": "Reference Power - Default rssi at 1 metre distance, for distance calibration.",
+          "unconfigured_rssi_threshold": "Unconfigured Device RSSI Threshold - Minimum signal strength (in dBm, e.g. -85) to discover unconfigured devices. Weaker packets are dropped.",
           "configured_devices": "Configured Devices - Select which Bluetooth devices or Beacons to track with Sensors."
         },
         "data_description": {
@@ -47,7 +48,8 @@
           "update_interval": "Shortening distances will still trigger immediately, but increasing distances will be rate limited by this to reduce how much your database grows.",
           "smoothing_samples": "How many samples to average distance smoothing. Bigger numbers make for slower distance increases. Shortening distances are not affected. 10 or 20 seems good.",
           "attenuation": "After setting ref_power at 1 metre, adjust attenuation so that other distances read correctly - more or less.",
-          "ref_power": "Put your most-common beacon 1 metre (3.28') away from your most-common proxy / scanner. Adjust ref_power until the distance sensor shows a lowest (not average) distance of 1 metre."
+          "ref_power": "Put your most-common beacon 1 metre (3.28') away from your most-common proxy / scanner. Adjust ref_power until the distance sensor shows a lowest (not average) distance of 1 metre.",
+          "unconfigured_rssi_threshold": "Advertisements for unconfigured devices below this threshold will be dropped early to avoid accumulating transient BLE noise in memory. Configured devices continue to be tracked regardless of this threshold."
         }
       },
       "selectdevices": {

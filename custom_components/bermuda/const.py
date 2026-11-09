@@ -178,6 +178,15 @@ DOCS[CONF_ATTENUATION] = "Factor for environmental signal attenuation."
 CONF_REF_POWER, DEFAULT_REF_POWER = "ref_power", -55.0
 DOCS[CONF_REF_POWER] = "Default RSSI for signal at 1 metre."
 
+CONF_UNCONFIGURED_RSSI_THRESHOLD, DEFAULT_UNCONFIGURED_RSSI_THRESHOLD = (
+    "unconfigured_rssi_threshold",
+    -85,
+)
+DOCS[CONF_UNCONFIGURED_RSSI_THRESHOLD] = (
+    "Minimum RSSI in dBm required to ingest and track unconfigured devices. "
+    "Adverts below this threshold are dropped early to prevent RF noise accumulation."
+)
+
 CONF_SAVE_AND_CLOSE = "save_and_close"
 CONF_SCANNER_INFO = "scanner_info"
 CONF_RSSI_OFFSETS = "rssi_offsets"

@@ -16,6 +16,7 @@ MOCK_OPTIONS = {
     custom_components.bermuda.const.CONF_SMOOTHING_SAMPLES: 20,
     custom_components.bermuda.const.CONF_ATTENUATION: 3.0,
     custom_components.bermuda.const.CONF_REF_POWER: -55.0,
+    custom_components.bermuda.const.CONF_UNCONFIGURED_RSSI_THRESHOLD: -85,
     custom_components.bermuda.const.CONF_DEVICES: [],  # ["EE:E8:37:9F:6B:54"],
 }
 
@@ -27,6 +28,7 @@ MOCK_OPTIONS_GLOBALS = {
     custom_components.bermuda.const.CONF_SMOOTHING_SAMPLES: 20,
     custom_components.bermuda.const.CONF_ATTENUATION: 3.0,
     custom_components.bermuda.const.CONF_REF_POWER: -55.0,
+    custom_components.bermuda.const.CONF_UNCONFIGURED_RSSI_THRESHOLD: -85,
 }
 
 MOCK_OPTIONS_DEVICES = {

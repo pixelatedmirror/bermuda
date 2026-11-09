@@ -35,6 +35,7 @@ from .const import (
     CONF_SCANNER_INFO,
     CONF_SCANNERS,
     CONF_SMOOTHING_SAMPLES,
+    CONF_UNCONFIGURED_RSSI_THRESHOLD,
     CONF_UPDATE_INTERVAL,
     DEFAULT_ATTENUATION,
     DEFAULT_DEVTRACK_TIMEOUT,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_MAX_VELOCITY,
     DEFAULT_REF_POWER,
     DEFAULT_SMOOTHING_SAMPLES,
+    DEFAULT_UNCONFIGURED_RSSI_THRESHOLD,
     DEFAULT_UPDATE_INTERVAL,
     DISTANCE_INFINITE,
     DOMAIN,
@@ -229,6 +231,12 @@ class BermudaOptionsFlowHandler(OptionsFlowWithConfigEntry):
                 CONF_REF_POWER,
                 default=self.options.get(CONF_REF_POWER, DEFAULT_REF_POWER),
             ): vol.Coerce(float),
+            vol.Required(
+                CONF_UNCONFIGURED_RSSI_THRESHOLD,
+                default=self.options.get(
+                    CONF_UNCONFIGURED_RSSI_THRESHOLD, DEFAULT_UNCONFIGURED_RSSI_THRESHOLD
+                ),
+            ): vol.Coerce(int),
         }
 
         return self.async_show_form(step_id="globalopts", data_schema=vol.Schema(data_schema))

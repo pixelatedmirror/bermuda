@@ -73,6 +73,7 @@ from .const import (
     CONF_RSSI_OFFSETS,
     CONF_SCANNER,
     CONF_SMOOTHING_SAMPLES,
+    CONF_UNCONFIGURED_RSSI_THRESHOLD,
     CONF_UPDATE_INTERVAL,
     DEFAULT_ATTENUATION,
     DEFAULT_DEVTRACK_TIMEOUT,
@@ -80,6 +81,7 @@ from .const import (
     DEFAULT_MAX_VELOCITY,
     DEFAULT_REF_POWER,
     DEFAULT_SMOOTHING_SAMPLES,
+    DEFAULT_UNCONFIGURED_RSSI_THRESHOLD,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     DOMAIN_PRIVATE_BLE_DEVICE,
@@ -746,6 +748,10 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         """Perform the gathering of backend Bluetooth Data and updating scanners and devices."""
         nowstamp = monotonic_time_coarse()
         _timestamp_cutoff = nowstamp - min(PRUNE_TIME_DEFAULT, PRUNE_TIME_UNKNOWN_IRK)
+        unconfigured_rssi_threshold = self.options.get(
+            CONF_UNCONFIGURED_RSSI_THRESHOLD, DEFAULT_UNCONFIGURED_RSSI_THRESHOLD
+        )
+        configured_devices = {addr.upper() for addr in self.options.get(CONF_DEVICES, [])}
 
         # Initialise ha_scanners if we haven't already
         if self._scanner_init_pending:
@@ -783,6 +789,17 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                 if advertisementdata.rssi == -127:
                     # BlueZ is pushing bogus adverts for paired but absent devices.
                     continue
+
+                # Filter weak adverts for unconfigured devices below the RSSI threshold
+                addr_upper = bledevice.address.upper()
+                if (
+                    addr_upper not in configured_devices
+                    and mac_norm(bledevice.address) not in self.scanner_list
+                ):
+                    existing_device = self._get_device(bledevice.address)
+                    if existing_device is None or not existing_device.is_advert_tracked:
+                        if advertisementdata.rssi < unconfigured_rssi_threshold:
+                            continue
 
                 device = self._get_or_create_device(bledevice.address)
                 device.process_advertisement(scanner_device, advertisementdata)
