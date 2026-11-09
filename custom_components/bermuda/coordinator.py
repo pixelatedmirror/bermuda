@@ -848,18 +848,40 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         # Prune devices.
         prune_list: list[str] = []  # list of addresses to be pruned
         prunable_stamps: dict[str, float] = {}  # dict of potential prunees if we need to be more aggressive.
+        configured_devices = {addr.upper() for addr in self.options.get(CONF_DEVICES, [])}
+
+        # Prune unconfigured metadevices that have not been seen within PRUNE_TIME_DEFAULT
+        stale_metadevices: list[str] = []
+        for meta_addr, metadevice in self.metadevices.items():
+            if (
+                not metadevice.create_sensor
+                and meta_addr.upper() not in configured_devices
+            ):
+                if metadevice.last_seen < nowstamp - PRUNE_TIME_DEFAULT:
+                    stale_metadevices.append(meta_addr)
+
+        for meta_addr in stale_metadevices:
+            _LOGGER.debug("Pruning unconfigured stale metadevice %s", meta_addr)
+            if dev := self.metadevices.pop(meta_addr, None):
+                dev.adverts.clear()
+            if dev := self.devices.pop(meta_addr, None):
+                dev.adverts.clear()
 
         metadevice_source_keepers = set()
-        for metadevice in self.metadevices.values():
+        for meta_addr, metadevice in self.metadevices.items():
+            is_configured_meta = (
+                metadevice.create_sensor or meta_addr.upper() in configured_devices
+            )
             if len(metadevice.metadevice_sources) > 0:
-                # Always keep the most recent source, which we keep in index 0.
-                # This covers static iBeacon sources, and possibly IRKs that might exceed
-                # the spec lifetime but are going stale because they're away for a bit.
                 _first = True
                 for address in metadevice.metadevice_sources:
                     if _device := self._get_device(address):
-                        if _first or _device.last_seen > stamp_known_irk:
-                            # The source has been seen within the spec's limits, keep it.
+                        if _device.last_seen > stamp_known_irk or (
+                            is_configured_meta
+                            and _first
+                            and _device.last_seen > nowstamp - PRUNE_TIME_DEFAULT
+                        ):
+                            # The source has been seen within the spec's limits or is recent primary source.
                             metadevice_source_keepers.add(address)
                             _first = False
                         else:
@@ -869,23 +891,14 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
 
         for device_address, device in self.devices.items():
             # Prune any devices that haven't been heard from for too long, but only
-            # if we aren't actively tracking them and it's a traditional MAC address.
-            # We just collect the addresses first, and do the pruning after exiting this iterator
-            #
-            # Reduced selection criteria - basically if if's not:
-            # - a scanner (beacuse we need those!)
-            # - any metadevice less than 15 minutes old (PRUNE_TIME_KNOWN_IRK)
-            # - a private_ble device (because they will re-create anyway, plus we auto-sensor them
-            # - create_sensor
-            # then it should be up for pruning. A stale iBeacon that we don't actually track
-            # should totally be pruned if it's no longer around.
+            # if we aren't actively tracking them and it's not a scanner or keeper.
             if (
                 device_address not in metadevice_source_keepers
                 and device_address not in self.metadevices
                 and device_address not in self.scanner_list
                 and (not device.create_sensor)  # Not if we track the device
                 and (not device.is_scanner)  # redundant, but whatevs.
-                and device.address_type != BDADDR_TYPE_NOT_MAC48
+                and device_address.upper() not in configured_devices
             ):
                 if device.address_type in (
                     BDADDR_TYPE_RANDOM_RESOLVABLE,
@@ -916,14 +929,14 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                         prunable_stamps[device_address] = device.last_seen
 
                 elif device.last_seen < nowstamp - PRUNE_TIME_DEFAULT:
-                    # It's a static address, and stale.
+                    # It's an untracked static address or untracked non-mac48 device, and stale.
                     _LOGGER.debug(
                         "Marking old device entry for pruning: %s",
                         device.name,
                     )
                     prune_list.append(device_address)
                 else:
-                    # Device is static, not tracked, not so old, but we might have to prune it anyway
+                    # Device is untracked, not so old, but we might have to prune it anyway
                     prunable_stamps[device_address] = device.last_seen
 
             # Do nothing else at this level without excluding the keepers first.
@@ -964,6 +977,7 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         # Prune the source devices
         for device_address in prune_list:
             _LOGGER.debug("Acting on prune list for %s", device_address)
+            self.metadevices.pop(device_address, None)
             if dev := self.devices.pop(device_address, None):
                 dev.adverts.clear()
 
@@ -975,11 +989,6 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
         # Just brute-force all devices, because it was getting a bit hairy
         # ensuring we hit the right ones, and the cost is fairly low and periodic.
         for device in self.devices.values():
-            # if (
-            #     device.is_scanner
-            #     or METADEVICE_PRIVATE_BLE_DEVICE in device.metadevice_type
-            #     or METADEVICE_IBEACON_DEVICE in device.metadevice_type
-            # ):
             # clean out the metadevice_sources field
             for address in prune_list:
                 if address in device.metadevice_sources:
@@ -987,11 +996,14 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
 
             # clean out the device/scanner advert pairs
             for advert_tuple in list(device.adverts.keys()):
-                if device.adverts[advert_tuple].device_address in prune_list:
+                adv = device.adverts[advert_tuple]
+                if adv.device_address in prune_list or (
+                    adv.stamp > 0 and adv.stamp < nowstamp - PRUNE_TIME_DEFAULT
+                ):
                     _LOGGER.debug(
                         "Pruning metadevice advert %s aged %ds",
                         advert_tuple,
-                        nowstamp - device.adverts[advert_tuple].stamp,
+                        nowstamp - adv.stamp,
                     )
                     del device.adverts[advert_tuple]
 
