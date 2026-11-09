@@ -183,6 +183,7 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            always_update=True,
         )
 
         self._waitingfor_load_manufacturer_ids = True
@@ -308,14 +309,16 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
             SupportsResponse.ONLY,
         )
 
-        # Register for newly discovered / changed BLE devices
+        # Register for newly discovered / changed BLE devices in PASSIVE mode.
+        # PASSIVE mode avoids forcing ESPHome proxies and local adapters to send SCAN_REQ
+        # packets, eliminating memory and network storms in HA Core.
         if self.config_entry is not None:
             self.config_entry.async_on_unload(
                 bluetooth.async_register_callback(
                     self.hass,
                     self.async_handle_advert,
                     bluetooth.BluetoothCallbackMatcher(connectable=False),
-                    bluetooth.BluetoothScanningMode.ACTIVE,
+                    bluetooth.BluetoothScanningMode.PASSIVE,
                 )
             )
 
@@ -872,6 +875,16 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
             is_configured_meta = (
                 metadevice.create_sensor or meta_addr.upper() in configured_devices
             )
+            # Purge ghost sources that no longer exist in self.devices
+            metadevice.metadevice_sources = [
+                addr for addr in metadevice.metadevice_sources if addr in self.devices
+            ]
+            # Purge any adverts on metadevice for sources that are no longer active
+            active_sources = set(metadevice.metadevice_sources)
+            for key_tuple in list(metadevice.adverts.keys()):
+                if key_tuple[0] not in active_sources:
+                    del metadevice.adverts[key_tuple]
+
             if len(metadevice.metadevice_sources) > 0:
                 _first = True
                 for address in metadevice.metadevice_sources:
@@ -1191,14 +1204,8 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                 # it causes a binge/purge cycle during pruning since it has no adverts on it.
                 source_device = self._get_device(source_address)
                 if source_device is None:
-                    # No ads current in the backend for this one. Not an issue, the mac might be old
-                    # or now showing up yet.
-                    # _LOGGER_SPAM_LESS.debug(
-                    #     f"metaNoAdsFor_{metadevice.address}_{source_address}",
-                    #     "Metadevice %s: no adverts for source MAC %s found during update_metadevices",
-                    #     metadevice.__repr__(),
-                    #     source_address,
-                    # )
+                    # Source device was pruned or no longer exists in backend; remove from metadevice sources.
+                    _sources_to_remove.append(source_address)
                     continue
 
                 if (
@@ -1283,9 +1290,20 @@ class BermudaDataUpdateCoordinator(DataUpdateCoordinator):
                     ):
                         metadevice[key] = val
                         # _want_name_update = True
-            # Done iterating sources, remove any to be dropped
+            # Done iterating sources, remove any to be dropped and clean out their adverts
             for source in _sources_to_remove:
-                metadevice.metadevice_sources.remove(source)
+                if source in metadevice.metadevice_sources:
+                    metadevice.metadevice_sources.remove(source)
+                for key_address, key_scanner in list(metadevice.adverts):
+                    if key_address == source:
+                        del metadevice.adverts[(key_address, key_scanner)]
+
+            # Purge any remaining adverts for sources that are no longer active
+            active_sources = set(metadevice.metadevice_sources)
+            for key_address, key_scanner in list(metadevice.adverts):
+                if key_address not in active_sources:
+                    del metadevice.adverts[(key_address, key_scanner)]
+
             if _want_name_update:
                 metadevice.make_name()
 
